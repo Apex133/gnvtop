@@ -23,7 +23,7 @@ One Python file, one HTML file, **zero dependencies** (Python 3 standard library
 ## Install
 
 ```bash
-git clone https://github.com/<you>/gnvtop.git
+git clone https://github.com/Apex133/gnvtop.git
 cd gnvtop
 ./install.sh
 ```
