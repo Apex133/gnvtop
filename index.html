@@ -1,0 +1,801 @@
+<!doctype html>
+<html lang="en" data-density="regular">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gnvtop · GPU monitor</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='10' width='3' height='5' rx='1' fill='%233B82F6'/%3E%3Crect x='6' y='6' width='3' height='9' rx='1' fill='%238B5CF6'/%3E%3Crect x='11' y='2' width='3' height='13' rx='1' fill='%2306B6D4'/%3E%3C/svg%3E">
+<style>
+/* ============ TOKENS — Glassmorphism, light + dark themes ============ */
+:root, html[data-theme="light"]{
+  --c-primary:#3B82F6; --c-secondary:#8B5CF6; --c-accent:#6366F1; --c-cyan:#0891B2;
+  --c-success:#16A34A; --c-warning:#D97706; --c-danger:#DC2626;
+  --c-ok-tx:#15803D; --c-warn-tx:#B45309; --c-bad-tx:#B91C1C;
+  --c-surface:rgba(255,255,255,.68); --c-surface-strong:rgba(255,255,255,.88);
+  --c-text:#1F2937; --c-text-soft:#4B5563; --c-border:rgba(255,255,255,.55);
+  --c-grid:rgba(31,41,55,.10); --c-skel:rgba(31,41,55,.07);
+  --grad-bg:linear-gradient(135deg,#EFF6FF 0%,#F5F3FF 52%,#ECFEFF 100%);
+  --t-c:#1D4ED8; --t-g:#6D28D9; --t-cg:#4338CA;
+  --shadow:0 8px 32px rgba(31,41,55,.12);
+}
+html[data-theme="dark"]{
+  --c-primary:#60A5FA; --c-secondary:#A78BFA; --c-accent:#818CF8; --c-cyan:#22D3EE;
+  --c-success:#16A34A; --c-warning:#D97706; --c-danger:#DC2626;
+  --c-ok-tx:#4ADE80; --c-warn-tx:#FBBF24; --c-bad-tx:#F87171;
+  --c-surface:rgba(15,23,42,.66); --c-surface-strong:rgba(15,23,42,.88);
+  --c-text:#F1F5F9; --c-text-soft:#94A3B8; --c-border:rgba(148,163,184,.22);
+  --c-grid:rgba(148,163,184,.16); --c-skel:rgba(148,163,184,.12);
+  --grad-bg:linear-gradient(135deg,#0F172A 0%,#1E1B4B 52%,#082F49 100%);
+  --t-c:#93C5FD; --t-g:#C4B5FD; --t-cg:#A5B4FC;
+  --shadow:0 8px 32px rgba(0,0,0,.45);
+}
+:root{
+  --f-ui:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --t-12:12px; --t-14:14px; --t-16:16px; --t-20:20px; --t-24:24px; --t-32:32px;
+  --u:4px;
+  --sp-4:calc(var(--u)*1); --sp-8:calc(var(--u)*2); --sp-12:calc(var(--u)*3);
+  --sp-16:calc(var(--u)*4); --sp-24:calc(var(--u)*6); --sp-32:calc(var(--u)*8);
+  --r-panel:16px; --r-chip:8px; --blur:16px;
+}
+html[data-density="compact"]{--u:3px}
+html[data-density="relaxed"] {--u:5px}
+
+/* ============ BASE ============ */
+*{box-sizing:border-box}
+body{margin:0; min-height:100vh; font-family:var(--f-ui); color:var(--c-text);
+  background:var(--grad-bg) fixed; font-size:var(--t-14); line-height:1.5}
+:focus-visible{outline:2px solid var(--c-primary); outline-offset:2px; border-radius:4px}
+h1,h2,h3{margin:0; font-weight:700}
+.mono{font-family:var(--f-mono); font-variant-numeric:tabular-nums}
+.sr-only{position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0}
+.glass{background:var(--c-surface); border:1px solid var(--c-border); border-radius:var(--r-panel);
+  backdrop-filter:blur(var(--blur)); -webkit-backdrop-filter:blur(var(--blur)); box-shadow:var(--shadow)}
+
+/* ============ LAYOUT ============ */
+.page{display:grid; grid-template-areas:"header" "main"; grid-template-rows:auto 1fr;
+  gap:var(--sp-24); max-width:1500px; margin:0 auto; padding:var(--sp-24)}
+header.topbar{grid-area:header}
+main{grid-area:main; display:grid; gap:var(--sp-24)}
+
+/* ============ TOP BAR ============ */
+.topbar{display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-16); padding:var(--sp-12) var(--sp-24)}
+.brand{display:flex; align-items:baseline; gap:var(--sp-8); margin-right:auto}
+.brand h1{font-size:var(--t-24); letter-spacing:-.02em}
+.brand h1 b{color:var(--c-primary)}
+.live{display:flex; align-items:center; gap:var(--sp-8); font-size:var(--t-12); color:var(--c-text-soft)}
+.live .dot{width:8px; height:8px; border-radius:50%; background:var(--c-success); animation:pulse 2s infinite}
+.live.stopped .dot{background:var(--c-warning); animation:none}
+.live.err .dot{background:var(--c-danger); animation:none}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--c-success) 40%, transparent)} 50%{box-shadow:0 0 0 6px transparent}}
+.controls{display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-12)}
+
+/* segmented theme control */
+.seg{display:inline-flex; border:1px solid var(--c-border); border-radius:var(--r-chip); overflow:hidden;
+  background:var(--c-surface-strong)}
+.seg button{all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+  min-height:44px; padding:0 var(--sp-12); color:var(--c-text-soft); font:600 var(--t-12) var(--f-ui)}
+.seg button + button{border-left:1px solid var(--c-border)}
+.seg button:hover{color:var(--c-text)}
+.seg button[aria-pressed="true"]{background:var(--c-primary); color:#fff}
+.seg svg{width:16px; height:16px}
+
+/* ============ BUTTONS — 7 states ============ */
+.btn{display:inline-flex; align-items:center; justify-content:center; gap:var(--sp-8);
+  min-height:44px; padding:0 var(--sp-16); border-radius:var(--r-chip);
+  border:1px solid var(--c-primary); background:var(--c-primary); color:#fff;
+  font:600 var(--t-14) var(--f-ui); cursor:pointer; transition:filter .15s, transform .05s}
+.btn:hover:not(:disabled){filter:brightness(1.08)}
+.btn:focus-visible{outline:2px solid var(--c-primary); outline-offset:2px}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.45; cursor:not-allowed}
+.btn.is-loading{color:transparent; position:relative; pointer-events:none}
+.btn.is-loading::after{content:""; position:absolute; width:16px; height:16px; border-radius:50%;
+  border:2px solid rgba(255,255,255,.35); border-top-color:#fff; animation:spin .7s linear infinite}
+.btn.is-error{border-color:var(--c-danger); background:var(--c-danger)}
+.btn-ok{border-color:var(--c-success); background:var(--c-success)}
+.btn-stop{border-color:var(--c-danger); background:var(--c-danger)}
+.btn-exit{background:transparent; color:var(--c-bad-tx); border-color:var(--c-border)}
+.btn-exit:hover:not(:disabled){filter:none; background:var(--c-danger); border-color:var(--c-danger); color:#fff}
+.btn-ghost{background:transparent; color:var(--c-text); border-color:var(--c-border)}
+.btn-ghost:hover:not(:disabled){filter:none; border-color:var(--c-primary); color:var(--c-primary)}
+.btn svg{width:16px; height:16px}
+.iconbtn{width:44px; padding:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+select,input[type="number"]{min-height:44px; padding:0 var(--sp-12); border-radius:var(--r-chip);
+  border:1px solid var(--c-border); background:var(--c-surface-strong); color:var(--c-text);
+  font:500 var(--t-14) var(--f-ui); cursor:pointer}
+input[type="number"]{cursor:text; width:90px}
+select:hover,input:hover{border-color:var(--c-primary)}
+select:focus-visible,input:focus-visible{outline:2px solid var(--c-primary); outline-offset:2px}
+
+/* ============ GPU GRID + TILE ============ */
+.gpu-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:var(--sp-24)}
+main.stale{opacity:.55; transition:opacity .3s}
+.tile{padding:var(--sp-24); display:grid; gap:var(--sp-16); --ac:var(--c-primary); --ac-soft:rgba(59,130,246,.13)}
+.tile-head{display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-8)}
+.tile-head h2{font-size:var(--t-16)}
+.badge{font:600 var(--t-12) var(--f-mono); padding:2px var(--sp-8); border-radius:999px;
+  background:var(--ac-soft); color:var(--ac)}
+.tile-head .drv{margin-left:auto; color:var(--c-text-soft); font-size:var(--t-12)}
+.tile-body{display:grid; grid-template-columns:auto 1fr; gap:var(--sp-24); align-items:center}
+
+.gauge{position:relative; width:132px; height:132px}
+.gauge svg{transform:rotate(-90deg)}
+.gauge .track{fill:none; stroke:var(--c-grid); stroke-width:10}
+.gauge .fg{fill:none; stroke:var(--ac); stroke-width:10; stroke-linecap:round;
+  stroke-dasharray:326.7; stroke-dashoffset:326.7; transition:stroke-dashoffset .4s}
+.gauge .val{position:absolute; inset:0; display:grid; place-content:center; text-align:center}
+.gauge .val b{font:700 var(--t-32) var(--f-mono); letter-spacing:-.03em}
+.gauge .val span{font-size:var(--t-12); color:var(--c-text-soft); text-transform:uppercase; letter-spacing:.08em}
+
+.stats{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--sp-12)}
+.stat{background:var(--c-surface-strong); border:1px solid var(--c-border); border-radius:var(--r-chip);
+  padding:var(--sp-8) var(--sp-12); min-width:0}
+.stat dt{font-size:var(--t-12); color:var(--c-text-soft); display:flex; gap:6px; align-items:center}
+.stat dt .dot{width:8px; height:8px; border-radius:50%; background:var(--dc, var(--c-primary)); flex:none}
+.stat dd{margin:0; font:600 var(--t-16) var(--f-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.stat dd small{font:500 var(--t-12) var(--f-mono); color:var(--c-text-soft)}
+.c-ok{color:var(--c-ok-tx)} .c-warn{color:var(--c-warn-tx)} .c-bad{color:var(--c-bad-tx)}
+
+.bar-row{display:grid; gap:var(--sp-4)}
+.bar-row .lbl{display:flex; justify-content:space-between; font-size:var(--t-12); color:var(--c-text-soft)}
+.bar{height:10px; border-radius:999px; background:var(--c-grid); overflow:hidden}
+.bar .fill{height:100%; width:0; border-radius:999px;
+  background:linear-gradient(90deg,var(--ac),var(--c-secondary)); transition:width .4s}
+.bar .fill.hot{background:linear-gradient(90deg,var(--c-warning),var(--c-danger))}
+
+/* ============ CHART with % Y axis + time X axis ============ */
+.chart-row{display:grid; gap:var(--sp-4)}
+.chart-row .lbl{font-size:var(--t-12); color:var(--c-text-soft); display:flex; justify-content:space-between}
+.chart{display:grid; grid-template-columns:auto 1fr; gap:var(--sp-8); align-items:stretch}
+.chart .axis{display:flex; flex-direction:column; justify-content:space-between;
+  font:500 10px var(--f-mono); color:var(--c-text-soft); text-align:right; padding:1px 0}
+.chart svg{width:100%; height:96px; display:block}
+.chart .grid line{stroke:var(--c-grid); stroke-width:1; vector-effect:non-scaling-stroke}
+.chart polyline{fill:none; stroke:var(--ac); stroke-width:2; vector-effect:non-scaling-stroke}
+.chart path.area{fill:var(--ac-soft); stroke:none}
+.xaxis{display:flex; justify-content:space-between; padding-left:34px;
+  font:500 10px var(--f-mono); color:var(--c-text-soft)}
+
+/* ============ PROCESSES ============ */
+.procs{padding:var(--sp-24); display:grid; gap:var(--sp-12)}
+.procs-top{display:flex; align-items:center; gap:var(--sp-12); flex-wrap:wrap}
+.procs-top h2{font-size:var(--t-16)}
+.procs-top .count{font:600 var(--t-12) var(--f-mono);
+  background:rgba(139,92,246,.15); color:var(--t-g); border-radius:999px; padding:2px var(--sp-8)}
+.procs-toolbar{display:flex; align-items:center; gap:var(--sp-12); flex-wrap:wrap}
+.searchwrap{position:relative; flex:1 1 300px; min-width:220px}
+.searchwrap svg{position:absolute; left:12px; top:50%; translate:0 -50%; width:16px; height:16px;
+  color:var(--c-text-soft); pointer-events:none}
+.search{width:100%; min-height:40px; padding:0 var(--sp-12) 0 38px; border-radius:10px;
+  border:1px solid var(--c-border); background:var(--c-surface-strong); color:var(--c-text);
+  font:500 var(--t-14) var(--f-ui)}
+.search::placeholder{color:var(--c-text-soft)}
+.search:hover{border-color:var(--c-primary)}
+.fgroup{display:inline-flex; align-items:center; gap:2px; background:var(--c-surface-strong);
+  border:1px solid var(--c-border); border-radius:999px; padding:3px}
+.fgroup .flbl{font:600 var(--t-12) var(--f-ui); color:var(--c-text-soft); padding:0 var(--sp-4) 0 var(--sp-8)}
+.fgroup button{all:unset; cursor:pointer; min-height:30px; padding:0 var(--sp-12); border-radius:999px;
+  font:600 var(--t-12) var(--f-ui); color:var(--c-text-soft); transition:background .15s, color .15s}
+.fgroup button:hover{color:var(--c-text)}
+.fgroup button[aria-pressed="true"]{background:var(--c-primary); color:#fff}
+.btn-sm{min-height:36px; padding:0 var(--sp-12); font-size:13px}
+.tbl-wrap{max-height:420px; overflow:auto}
+table{width:100%; border-collapse:collapse; font-size:var(--t-14)}
+th,td{text-align:left; padding:var(--sp-8) var(--sp-12); border-bottom:1px solid var(--c-grid); white-space:nowrap}
+th{font-size:var(--t-12); text-transform:uppercase; letter-spacing:.06em; color:var(--c-text-soft)}
+thead th{position:sticky; top:0; z-index:1; background:var(--c-surface-strong)}
+th.chk,td.chk{width:44px; text-align:center; padding:var(--sp-4)}
+th.chk input,td.chk input{width:16px; height:16px; accent-color:var(--c-primary); cursor:pointer}
+tr.sel td{background:rgba(59,130,246,.10)}
+th button{all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:4px; min-height:44px; padding:0 2px}
+th button:hover{color:var(--c-text)}
+th[aria-sort] button{color:var(--c-primary); font-weight:700}
+td.num,th.num{text-align:right; font-family:var(--f-mono); font-variant-numeric:tabular-nums}
+tbody tr:hover{background:var(--c-surface-strong)}
+.ptype{font:600 var(--t-12) var(--f-mono); padding:1px var(--sp-8); border-radius:999px}
+.ptype.C{background:rgba(59,130,246,.15); color:var(--t-c)}
+.ptype.G{background:rgba(139,92,246,.15); color:var(--t-g)}
+.ptype.CG{background:rgba(99,102,241,.15); color:var(--t-cg)}
+.pname{font-family:var(--f-mono); font-size:var(--t-12)}
+
+/* ============ SETTINGS MODAL ============ */
+.scrim{position:fixed; inset:0; z-index:20; background:rgba(15,23,42,.45);
+  display:grid; place-items:center; padding:var(--sp-16)}
+.scrim[hidden]{display:none}
+.modal{width:min(560px,100%); max-height:88vh; overflow:auto; padding:var(--sp-24); display:grid; gap:var(--sp-16)}
+.modal h2{font-size:var(--t-20)}
+.modal-head{display:flex; align-items:center}
+.modal-head .btn{margin-left:auto}
+.set-grid{display:grid; grid-template-columns:1fr auto; gap:var(--sp-12) var(--sp-16); align-items:center}
+.set-grid label{font-size:var(--t-14); color:var(--c-text)}
+.set-grid .hint{grid-column:1/-1; font-size:var(--t-12); color:var(--c-text-soft); margin-top:calc(var(--sp-8)*-1)}
+.divider{border:none; border-top:1px solid var(--c-grid); margin:var(--sp-8) 0}
+.port-row{display:flex; gap:var(--sp-8); align-items:center; justify-content:flex-end}
+.srv-ok{color:var(--c-ok-tx)} .srv-bad{color:var(--c-bad-tx)}
+.modal-actions{display:flex; gap:var(--sp-8); justify-content:flex-end; flex-wrap:wrap}
+.kill-list{margin:0; font:500 var(--t-12) var(--f-mono); max-height:180px; overflow:auto}
+.toast{position:fixed; right:16px; bottom:16px; z-index:10; padding:var(--sp-12) var(--sp-24);
+  display:flex; gap:var(--sp-12); align-items:center; background:var(--c-surface-strong);
+  border:1px solid var(--c-primary); border-radius:var(--r-panel); backdrop-filter:blur(var(--blur));
+  box-shadow:var(--shadow); color:var(--c-text); font-weight:600; font-size:var(--t-14)}
+[hidden]{display:none!important}
+
+/* ============ OVERLAYS ============ */
+.errbar{position:fixed; inset:16px 16px auto; z-index:10; padding:var(--sp-12) var(--sp-24);
+  display:flex; gap:var(--sp-12); align-items:center; background:var(--c-surface-strong);
+  border:1px solid var(--c-danger); border-radius:var(--r-panel); backdrop-filter:blur(var(--blur));
+  box-shadow:var(--shadow); color:var(--c-bad-tx); font-weight:600}
+.errbar.info{border-color:var(--c-primary); color:var(--c-text)}
+.errbar[hidden]{display:none}
+.errbar svg{width:18px; height:18px; flex:none}
+.errbar .retry{margin-left:auto; font-family:var(--f-mono); font-weight:500; color:var(--c-text-soft)}
+.panel-empty{grid-column:1/-1; padding:var(--sp-32); text-align:center; color:var(--c-text-soft)}
+.panel-empty h2{color:var(--c-text); font-size:var(--t-20); margin-bottom:var(--sp-8)}
+.skel{border-radius:var(--r-chip); background:linear-gradient(100deg,var(--c-skel) 40%,var(--c-grid) 50%,var(--c-skel) 60%);
+  background-size:200% 100%; animation:shimmer 1.4s infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
+.tile.skel-tile{height:300px}
+.skel-row{height:36px; margin:var(--sp-8) 0}
+
+@media (max-width:560px){
+  .tile-body{grid-template-columns:1fr; justify-items:center}
+  .stats{width:100%}
+  .set-grid{grid-template-columns:1fr}
+  .port-row{justify-content:flex-start}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important; transition:none!important}
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="topbar glass">
+    <div class="brand">
+      <h1>gnv<b>top</b></h1>
+    </div>
+    <p class="live" id="live" role="status" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span><span id="liveTxt">connecting…</span>
+    </p>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Theme">
+        <button id="thLight" aria-pressed="false" title="Light theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Light</button>
+        <button id="thDark" aria-pressed="false" title="Dark theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>Dark</button>
+      </div>
+      <button class="btn btn-ok" id="btnStart" disabled>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Start</button>
+      <button class="btn btn-stop" id="btnStop">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>Stop</button>
+      <button class="btn btn-ghost iconbtn" id="btnSettings" aria-haspopup="dialog" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 1 1 1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+        <span class="sr-only">Settings</span></button>
+      <button class="btn btn-exit" id="btnExit" title="Stop the gnvtop server">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
+        Exit</button>
+    </div>
+  </header>
+
+  <main id="main" aria-busy="true">
+    <section class="gpu-grid" id="gpuGrid" aria-label="GPU cards">
+      <div class="glass tile skel-tile" aria-hidden="true"></div>
+      <div class="glass tile skel-tile" aria-hidden="true"></div>
+    </section>
+    <section class="glass procs" aria-label="GPU processes">
+      <div class="procs-top">
+        <h2>GPU processes</h2><span class="count" id="procCount">…</span>
+      </div>
+      <div class="procs-toolbar">
+        <div class="searchwrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <label class="sr-only" for="procSearch">Search processes</label>
+          <input type="search" id="procSearch" class="search" placeholder="Search name or PID…">
+        </div>
+        <div class="fgroup" role="group" aria-label="Filter by process type" id="typeGroup">
+          <span class="flbl">Type</span>
+          <button data-v="all" aria-pressed="true">All</button>
+          <button data-v="C" aria-pressed="false">C</button>
+          <button data-v="G" aria-pressed="false">G</button>
+          <button data-v="C+G" aria-pressed="false">C+G</button>
+        </div>
+        <div class="fgroup" role="group" aria-label="Top processes by current sort" id="topGroup">
+          <span class="flbl">Top</span>
+          <button data-v="all" aria-pressed="true">All</button>
+          <button data-v="5" aria-pressed="false">5</button>
+          <button data-v="10" aria-pressed="false">10</button>
+          <button data-v="25" aria-pressed="false">25</button>
+        </div>
+        <button class="btn btn-stop btn-sm" id="btnKill" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18.4 3.6 20.4 5.6M4.9 17.1l3-3m6.4-6.4 3-3M3.6 18.4l2-2m4.4-4.4a4 4 0 0 1 0-5.7l2.9-2.8a4 4 0 0 1 5.6 0l-8.5 8.5a4 4 0 0 1-5.6 0Zm0 0a4 4 0 0 0 0 5.7l2.8 2.8a4 4 0 0 0 5.7 0l1.8-1.8"/></svg>
+          Kill <span id="killCount"></span></button>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th class="chk"><input type="checkbox" id="selAll" aria-label="Select all visible processes"></th>
+            <th class="num"><button data-k="pid">PID <span class="arr" aria-hidden="true">↕</span></button></th>
+            <th><button data-k="type">Type <span class="arr" aria-hidden="true">↕</span></button></th>
+            <th><button data-k="name">Process <span class="arr" aria-hidden="true">↕</span></button></th>
+            <th class="num"><button data-k="mem_mib">GPU memory <span class="arr" aria-hidden="true">↕</span></button></th>
+          </tr></thead>
+          <tbody id="procBody"><tr><td colspan="4" class="skel skel-row"></td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+</div>
+
+<div class="errbar" id="errbar" role="alert" hidden>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4m0 4h.01"/></svg>
+  <span id="errTxt">Connection lost</span>
+  <span class="retry" id="errRetry"></span>
+</div>
+
+<div class="scrim" id="scrim" hidden>
+  <div class="glass modal" role="dialog" aria-modal="true" aria-labelledby="setTitle" id="modal">
+    <div class="modal-head">
+      <h2 id="setTitle">Settings</h2>
+      <button class="btn btn-ghost iconbtn" id="btnCloseSet" title="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        <span class="sr-only">Close settings</span></button>
+    </div>
+    <div class="set-grid">
+      <label for="sDensity">Density</label>
+      <select id="sDensity"><option value="compact">Compact</option><option value="regular" selected>Regular</option><option value="relaxed">Relaxed</option></select>
+      <label for="sInterval">Poll interval</label>
+      <select id="sInterval"><option value="1000" selected>1 s</option><option value="2000">2 s</option><option value="5000">5 s</option></select>
+      <label for="sHist">History window</label>
+      <select id="sHist"><option value="60">60 ticks</option><option value="120" selected>120 ticks</option><option value="300">300 ticks</option></select>
+      <label for="sTempW">Temp warning °C</label><input type="number" id="sTempW" min="30" max="120" value="70">
+      <label for="sTempC">Temp critical °C</label><input type="number" id="sTempC" min="40" max="120" value="85">
+      <label for="sPowW">Power warning %</label><input type="number" id="sPowW" min="10" max="100" value="70">
+      <label for="sPowC">Power critical %</label><input type="number" id="sPowC" min="20" max="100" value="90">
+      <p class="hint">These apply live and are stored in this browser.</p>
+      <hr class="divider">
+      <label for="sPort">Server port</label>
+      <div class="port-row">
+        <input type="number" id="sPort" min="1024" max="65535" value="8399">
+        <button class="btn" id="btnRestart">Apply &amp; restart</button>
+      </div>
+      <p class="hint" id="srvStatus">Restarting re-executes the gnvtop server on the new port.</p>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="killScrim" hidden>
+  <div class="glass modal" role="dialog" aria-modal="true" aria-labelledby="killTitle" id="killModal">
+    <div class="modal-head"><h2 id="killTitle">Kill processes?</h2></div>
+    <p class="kill-list" id="killList"></p>
+    <p class="hint" style="margin:0">Kill sends SIGTERM (graceful shutdown). Force kill sends SIGKILL (immediate, no cleanup).</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="killCancel">Cancel</button>
+      <button class="btn btn-stop" id="killTerm">Kill</button>
+      <button class="btn is-error" id="killForce">Force kill</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="exitScrim" hidden>
+  <div class="glass modal" role="dialog" aria-modal="true" aria-labelledby="exitTitle" id="exitModal">
+    <div class="modal-head"><h2 id="exitTitle">Stop gnvtop?</h2></div>
+    <p class="hint" style="margin:0">This stops the gnvtop server — the page goes offline until you run
+      <span class="mono">gnvtop</span> in a terminal again.</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="exitCancel">Cancel</button>
+      <button class="btn btn-stop" id="exitConfirm">Stop server</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden><span id="toastTxt"></span></div>
+
+<noscript><div class="errbar">gnvtop needs JavaScript to poll /api/gpus.</div></noscript>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const ACCENTS = { light: ["#2563EB","#7C3AED","#0E7490","#DB2777","#B45309","#047857"],
+                  dark:  ["#60A5FA","#A78BFA","#22D3EE","#F472B6","#FBBF24","#34D399"] };
+const ACCENT_SOFT = a => a + "21"; // ~13% alpha suffix for tints
+const hist = new Map();
+const refs = new Map();
+let lastData = null, fetchErr = false, running = true, timer = null, restarting = 0;
+let searchQ = "", topN = "all", typeF = "all";
+const sel = new Set();
+let visiblePids = [];
+const sort = { key: "mem_mib", dir: -1 };
+const S = loadSettings();
+
+function loadSettings(){
+  const d = { theme:null, density:"regular", interval:1000, histN:120, tempW:70, tempC:85, powW:70, powC:90 };
+  try { return { ...d, ...JSON.parse(localStorage.getItem("gnvsettings") || "{}") }; }
+  catch { return d; }
+}
+const saveSettings = () => localStorage.setItem("gnvsettings", JSON.stringify(S));
+
+/* ---------- theme ---------- */
+function applyTheme(t){
+  document.documentElement.dataset.theme = t;
+  $("#thLight").setAttribute("aria-pressed", String(t === "light"));
+  $("#thDark").setAttribute("aria-pressed", String(t === "dark"));
+  refs.forEach(r => setAccent(r.idx, r.el));
+}
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
+if (!S.theme) S.theme = systemDark.matches ? "dark" : "light";
+applyTheme(S.theme);
+systemDark.addEventListener("change", e => { if (!localStorage.getItem("gnvsettings")) applyTheme(S.theme = e.matches ? "dark" : "light"); });
+$("#thLight").addEventListener("click", () => { applyTheme(S.theme = "light"); saveSettings(); });
+$("#thDark").addEventListener("click", () => { applyTheme(S.theme = "dark"); saveSettings(); });
+
+/* ---------- helpers ---------- */
+const pct = v => v == null ? "—" : Math.round(v) + "%";
+const mem = mib => mib == null ? "—" : mib >= 1024 ? (mib/1024).toFixed(1) + " GiB" : mib + " MiB";
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const tfmt = v => v == null ? "—" : v + " °C";
+const wfmt = v => v == null ? "—" : v + " W";
+const clk = v => v == null ? "—" : v + " MHz";
+const tCls = v => v == null ? "" : v >= S.tempC ? "c-bad" : v >= S.tempW ? "c-warn" : "c-ok";
+const pCls = (p, lim) => { if (!lim || p == null) return ""; const r = p/lim*100;
+  return r >= S.powC ? "c-bad" : r >= S.powW ? "c-warn" : ""; };
+
+function sparkPoints(h){
+  const n = h.length, W = 100, H = 44;
+  if (!n) return { pts: "", area: "" };
+  const x = i => n === 1 ? W/2 : i * W / (n - 1);          // stretch until buffer fills
+  const y = v => 43 - Math.min(v,100)/100*40;               // 1px padding top/bottom
+  const pts = h.map((v,i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  return { pts, area: `0,43 ${pts} ${x(n-1).toFixed(1)},43` };
+}
+
+function setAccent(i, el){
+  const a = ACCENTS[S.theme][i % ACCENTS[S.theme].length];
+  el.style.setProperty("--ac", a);
+  el.style.setProperty("--ac-soft", ACCENT_SOFT(a));
+}
+
+/* ---------- tile build (once per gpu) ---------- */
+function buildTile(g, idx){
+  const el = document.createElement("article");
+  el.className = "glass tile";
+  setAccent(idx, el);
+  el.innerHTML = `
+    <div class="tile-head">
+      <h2>${esc(g.name)}</h2>
+      <span class="badge">${esc(g.vendor)}</span>
+      <span class="drv mono"></span>
+    </div>
+    <div class="tile-body">
+      <div class="gauge" role="img" aria-label="GPU utilization">
+        <svg width="132" height="132" viewBox="0 0 132 132" aria-hidden="true">
+          <circle class="track" cx="66" cy="66" r="52"/>
+          <circle class="fg" cx="66" cy="66" r="52"/>
+        </svg>
+        <div class="val"><b>—</b><span>util</span></div>
+      </div>
+      <dl class="stats">
+        <div class="stat"><dt><i class="dot" style="--dc:#F97316" aria-hidden="true"></i>Temperature</dt><dd class="js-temp">—</dd></div>
+        <div class="stat"><dt><i class="dot" style="--dc:#8B5CF6" aria-hidden="true"></i>Power</dt><dd class="js-power">—</dd></div>
+        <div class="stat"><dt><i class="dot" style="--dc:#06B6D4" aria-hidden="true"></i>Fan</dt><dd class="js-fan">—</dd></div>
+        <div class="stat"><dt><i class="dot" style="--dc:#6366F1" aria-hidden="true"></i>Clocks SM / Mem</dt><dd class="js-clk">—</dd></div>
+      </dl>
+    </div>
+    <div class="bar-row">
+      <div class="lbl"><span>VRAM</span><span class="js-memlbl mono">—</span></div>
+      <div class="bar" role="progressbar" aria-label="VRAM usage"><div class="fill"></div></div>
+    </div>
+    <div class="chart-row">
+      <div class="lbl"><span>Utilization · <span class="js-win"></span></span><span class="js-now mono"></span></div>
+      <div class="chart">
+        <div class="axis" aria-hidden="true"><span>100%</span><span>75</span><span>50</span><span>25</span><span>0</span></div>
+        <svg viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true">
+          <g class="grid">
+            <line x1="0" x2="100" y1="3"  y2="3"/><line x1="0" x2="100" y1="13" y2="13"/>
+            <line x1="0" x2="100" y1="23" y2="23"/><line x1="0" x2="100" y1="33" y2="33"/>
+            <line x1="0" x2="100" y1="43" y2="43"/>
+          </g>
+          <path class="area"></path><polyline points=""></polyline>
+        </svg>
+      </div>
+      <div class="xaxis" aria-hidden="true"><span></span><span></span><span></span><span></span><span class="xnow">now</span></div>
+    </div>`;
+  refs.set(g.id, {
+    el, idx,
+    drv: el.querySelector(".drv"), fg: el.querySelector(".gauge .fg"),
+    gaugeB: el.querySelector(".gauge .val b"), gaugeA: el.querySelector(".gauge"),
+    temp: el.querySelector(".js-temp"), power: el.querySelector(".js-power"),
+    fan: el.querySelector(".js-fan"), clk: el.querySelector(".js-clk"),
+    memlbl: el.querySelector(".js-memlbl"), fill: el.querySelector(".bar .fill"),
+    bar: el.querySelector(".bar"), line: el.querySelector(".chart polyline"),
+    area: el.querySelector(".chart .area"), now: el.querySelector(".js-now"),
+  });
+  return el;
+}
+
+/* ---------- tile update ---------- */
+function updateTile(g){
+  const r = refs.get(g.id);
+  r.drv.textContent = g.driver ? "driver " + g.driver : "";
+  const u = g.util == null ? 0 : g.util;
+  r.fg.style.strokeDashoffset = 326.7 * (1 - Math.min(u,100)/100);
+  r.gaugeB.textContent = pct(g.util);
+  r.gaugeA.setAttribute("aria-label", `GPU utilization ${pct(g.util)}`);
+  r.temp.textContent = tfmt(g.temp_c);
+  r.temp.className = "js-temp " + tCls(g.temp_c);
+  r.power.innerHTML = g.power_w == null ? "—" :
+    `${wfmt(g.power_w)}${g.power_limit_w ? ` <small>/ ${g.power_limit_w} W</small>` : ""}`;
+  r.power.className = "js-power " + pCls(g.power_w, g.power_limit_w);
+  r.fan.textContent = g.fan_pct == null ? "—" : g.fan_pct === 0 ? "0% (idle)" : g.fan_pct + "%";
+  if (g.fan_pct === 0) r.fan.title = "Zero-RPM: fans off below vendor threshold";
+  r.clk.innerHTML = `${clk(g.clock_sm_mhz)} <small>/ ${clk(g.clock_mem_mhz)}</small>`;
+  r.memlbl.textContent = g.mem_used_mib == null ? "not exposed by driver" :
+    `${mem(g.mem_used_mib)} / ${mem(g.mem_total_mib)}`;
+  if (g.mem_used_mib != null && g.mem_total_mib){
+    const p = g.mem_used_mib / g.mem_total_mib * 100;
+    r.fill.style.width = Math.min(p,100) + "%";
+    r.fill.classList.toggle("hot", p > 90);
+    r.bar.setAttribute("aria-valuenow", Math.round(p));
+  }
+  r.now.textContent = pct(g.util);
+  const h = hist.get(g.id) || [];
+  const { pts, area } = sparkPoints(h);
+  r.line.setAttribute("points", pts);
+  r.area.setAttribute("d", area ? "M" + area.split(" ").join(" L") + " Z" : "");
+}
+
+/* ---------- render ---------- */
+function render(d){
+  const grid = $("#gpuGrid");
+  const ids = d.gpus.map(g => g.id).join("|");
+  if (grid.dataset.ids !== ids){
+    grid.dataset.ids = ids;
+    grid.innerHTML = "";
+    if (!d.gpus.length){
+      grid.insertAdjacentHTML("beforeend",
+        `<div class="glass panel-empty">
+           <h2>No GPUs detected</h2>
+           nvidia-smi: ${esc(d.sources.nvidia)} · amdgpu sysfs: ${esc(d.sources.amd)}
+         </div>`);
+      refs.clear(); hist.clear();
+    } else {
+      d.gpus.forEach((g,i) => { grid.appendChild(buildTile(g,i)); hist.set(g.id, []); });
+      refreshAxes();
+    }
+  }
+  d.gpus.forEach(g => {
+    const h = hist.get(g.id) || hist.set(g.id, []).get(g.id);
+    h.push(g.util == null ? 0 : g.util);
+    while (h.length > S.histN) h.shift();
+    updateTile(g);
+  });
+
+  // prune selection of processes that no longer exist
+  const live = new Set(d.processes.map(p => p.pid));
+  [...sel].forEach(pid => { if (!live.has(pid)) sel.delete(pid); });
+
+  let rows = [...d.processes];
+  if (typeF !== "all") rows = rows.filter(p => (p.type || "").toUpperCase() === typeF);
+  if (searchQ){
+    const q = searchQ.toLowerCase();
+    rows = rows.filter(p => p.name.toLowerCase().includes(q) || String(p.pid).includes(q));
+  }
+  rows.sort((a,b) => (a[sort.key] > b[sort.key] ? 1 : a[sort.key] < b[sort.key] ? -1 : 0) * sort.dir);
+  if (topN !== "all") rows = rows.slice(0, +topN);
+  visiblePids = rows.map(p => p.pid);
+  $("#procCount").textContent = rows.length < d.processes.length ? `${rows.length} / ${d.processes.length}` : String(rows.length);
+  $("#procBody").innerHTML = rows.length ? rows.map(p =>
+    `<tr${sel.has(p.pid) ? ' class="sel"' : ""}><td class="chk"><input type="checkbox" data-pid="${p.pid}"${sel.has(p.pid) ? " checked" : ""} aria-label="Select ${esc(p.name)}"></td>
+        <td class="num">${p.pid}</td>
+        <td><span class="ptype ${(p.type || "?").replace("+","")}">${esc(p.type)}</span></td>
+        <td class="pname">${esc(p.name)}</td>
+        <td class="num">${mem(p.mem_mib)}</td></tr>`).join("")
+    : `<tr><td colspan="5" style="color:var(--c-text-soft)">${searchQ ? "No processes match your search." : typeF !== "all" ? `No processes of type ${esc(typeF)}.` : "No GPU processes running."}</td></tr>`;
+  $("#selAll").checked = visiblePids.length > 0 && visiblePids.every(pid => sel.has(pid));
+  updateKillBtn();
+}
+
+/* ---------- polling with start/stop ---------- */
+async function tick(){
+  if (!running || document.hidden || Date.now() < restarting) return;
+  try {
+    const res = await fetch("/api/gpus", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    lastData = await res.json();
+    fetchErr = false;
+    render(lastData);
+  } catch {
+    fetchErr = true;
+  }
+  setStatus();
+}
+function setStatus(){
+  const live = $("#live"), bar = $("#errbar");
+  live.classList.toggle("err", fetchErr && running);
+  live.classList.toggle("stopped", !running);
+  $("#liveTxt").textContent = !running ? "stopped" : fetchErr ? "connection lost" :
+    lastData ? `live · ${new Date(lastData.ts*1000).toLocaleTimeString()}` : "connecting…";
+  const showBar = fetchErr && running && Date.now() >= restarting;
+  bar.hidden = !showBar;
+  bar.classList.toggle("info", false);
+  if (showBar) $("#errTxt").textContent = "Cannot reach gnvtop server";
+  $("#btnStart").disabled = running;
+  $("#btnStop").disabled = !running;
+}
+function schedule(){
+  clearTimeout(timer);
+  timer = setTimeout(async () => { await tick(); schedule(); }, S.interval);
+}
+$("#btnStart").addEventListener("click", () => { running = true; tick(); schedule(); setStatus(); });
+$("#btnStop").addEventListener("click", () => { running = false; clearTimeout(timer); setStatus(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
+
+/* ---------- table sorting ---------- */
+function updateArrows(){
+  document.querySelectorAll("th button").forEach(b => {
+    b.querySelector(".arr").textContent =
+      b.dataset.k === sort.key ? (sort.dir === 1 ? "▲" : "▼") : "↕";
+  });
+}
+document.querySelectorAll("th button").forEach(b => b.addEventListener("click", () => {
+  const k = b.dataset.k;
+  sort.dir = sort.key === k ? -sort.dir : (k === "name" || k === "type" ? 1 : -1);
+  sort.key = k;
+  const kind = ({pid:"numeric", name:"alpha", type:"alpha", mem_mib:"numeric"})[k];
+  document.querySelectorAll("th").forEach(th => {
+    if (th.contains(b)) th.setAttribute("aria-sort", kind + (sort.dir === 1 ? "ascending" : "descending"));
+    else th.removeAttribute("aria-sort");
+  });
+  updateArrows();
+  if (lastData) render(lastData);
+}));
+
+/* ---------- search + type/top filter groups ---------- */
+$("#procSearch").addEventListener("input", e => { searchQ = e.target.value.trim(); if (lastData) render(lastData); });
+for (const [id, apply] of [["typeGroup", v => typeF = v], ["topGroup", v => topN = v]]){
+  $("#" + id).addEventListener("click", e => {
+    const b = e.target.closest("button[data-v]");
+    if (!b) return;
+    apply(b.dataset.v);
+    b.parentElement.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    if (lastData) render(lastData);
+  });
+}
+
+/* ---------- selection + kill ---------- */
+function updateKillBtn(){
+  $("#btnKill").disabled = sel.size === 0;
+  $("#killCount").textContent = sel.size ? `(${sel.size})` : "";
+}
+
+/* ---------- exit ---------- */
+$("#btnExit").addEventListener("click", () => { $("#exitScrim").hidden = false; $("#exitCancel").focus(); });
+function closeExit(){ $("#exitScrim").hidden = true; $("#btnExit").focus(); }
+$("#exitCancel").addEventListener("click", closeExit);
+$("#exitScrim").addEventListener("click", e => { if (e.target === $("#exitScrim")) closeExit(); });
+$("#exitConfirm").addEventListener("click", async () => {
+  try { await fetch("/api/shutdown", { method: "POST" }); } catch {}
+  running = false;
+  clearTimeout(timer);
+  closeExit();
+  setStatus();
+  showToast("gnvtop server stopped — run 'gnvtop' in a terminal to restart");
+});
+$("#procBody").addEventListener("change", e => {
+  const c = e.target.closest('input[type="checkbox"][data-pid]');
+  if (!c) return;
+  const pid = +c.dataset.pid;
+  c.checked ? sel.add(pid) : sel.delete(pid);
+  c.closest("tr").classList.toggle("sel", c.checked);
+  updateKillBtn();
+});
+$("#selAll").addEventListener("change", e => {
+  visiblePids.forEach(pid => e.target.checked ? sel.add(pid) : sel.delete(pid));
+  if (lastData) render(lastData);
+});
+$("#btnKill").addEventListener("click", () => {
+  const ps = (lastData ? lastData.processes : []).filter(p => sel.has(p.pid));
+  if (!ps.length) return;
+  $("#killTitle").textContent = `Kill ${ps.length} process${ps.length > 1 ? "es" : ""}?`;
+  $("#killList").innerHTML = ps.map(p => `${p.pid} · ${esc(p.name)} · ${mem(p.mem_mib)}`).join("<br>");
+  $("#killScrim").hidden = false;
+  $("#killCancel").focus();
+});
+function closeKillModal(){ $("#killScrim").hidden = true; $("#btnKill").focus(); }
+$("#killCancel").addEventListener("click", closeKillModal);
+$("#killScrim").addEventListener("click", e => { if (e.target === $("#killScrim")) closeKillModal(); });
+let toastT = null;
+function showToast(msg){
+  $("#toastTxt").textContent = msg;
+  $("#toast").hidden = false;
+  clearTimeout(toastT);
+  toastT = setTimeout(() => { $("#toast").hidden = true; }, 4000);
+}
+async function doKill(sig){
+  const pids = [...sel];
+  try {
+    const res = await fetch("/api/kill", { method: "POST",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify({ pids, sig }) });
+    const r = await res.json();
+    const ok = r.results.filter(x => x.ok).length;
+    const bad = r.results.filter(x => !x.ok);
+    showToast(bad.length ? `Killed ${ok} · failed ${bad.length}: ${bad[0].err}` : `Sent SIG${sig} to ${ok} process${ok === 1 ? "" : "es"}`);
+  } catch {
+    showToast("Kill request failed — server unreachable.");
+  }
+  sel.clear();
+  closeKillModal();
+  updateKillBtn();
+  tick();
+}
+$("#killTerm").addEventListener("click", () => doKill("TERM"));
+$("#killForce").addEventListener("click", () => doKill("KILL"));
+
+/* ---------- chart time axis (relative, like nvtop) ---------- */
+const fmtDur = s => s >= 60 && s % 60 === 0 ? `-${s/60}m` : `-${s}s`;
+function refreshAxes(){
+  const total = Math.round(S.histN * S.interval / 1000);
+  const fracs = [1, .75, .5, .25];
+  document.querySelectorAll(".xaxis").forEach(x => {
+    x.querySelectorAll("span:not(.xnow)").forEach((sp, i) => {
+      if (fracs[i] != null) sp.textContent = fmtDur(Math.round(total * fracs[i]));
+    });
+  });
+  document.querySelectorAll(".js-win").forEach(el => el.textContent = `last ${total >= 60 && total % 60 === 0 ? total/60 + "m" : total + "s"}`);
+}
+$("#sInterval").addEventListener("change", e => { S.interval = +e.target.value; saveSettings(); schedule(); refreshAxes(); });
+$("#sHist").addEventListener("change", e => { S.histN = +e.target.value; saveSettings();
+  hist.forEach(h => { while (h.length > S.histN) h.shift(); }); refreshAxes(); if (lastData) render(lastData); });
+
+/* ---------- settings modal ---------- */
+const scrim = $("#scrim");
+function openSettings(){
+  $("#sDensity").value = S.density; $("#sInterval").value = String(S.interval);
+  $("#sHist").value = String(S.histN); $("#sTempW").value = S.tempW; $("#sTempC").value = S.tempC;
+  $("#sPowW").value = S.powW; $("#sPowC").value = S.powC;
+  $("#sPort").value = location.port || "8399";
+  scrim.hidden = false;
+  $("#sDensity").focus();
+}
+function closeSettings(){ scrim.hidden = true; $("#btnSettings").focus(); }
+$("#btnSettings").addEventListener("click", openSettings);
+$("#btnCloseSet").addEventListener("click", closeSettings);
+scrim.addEventListener("click", e => { if (e.target === scrim) closeSettings(); });
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if (!$("#killScrim").hidden) closeKillModal();
+  else if (!$("#exitScrim").hidden) closeExit();
+  else if (!scrim.hidden) closeSettings();
+});
+
+$("#sDensity").addEventListener("change", e => { S.density = e.target.value; document.documentElement.dataset.density = S.density; saveSettings(); });
+for (const [id, key] of [["sTempW","tempW"],["sTempC","tempC"],["sPowW","powW"],["sPowC","powC"]])
+  $("#"+id).addEventListener("change", e => { const v = +e.target.value; if (v > 0) { S[key] = v; saveSettings(); if (lastData) render(lastData); } });
+
+$("#btnRestart").addEventListener("click", async () => {
+  const port = +$("#sPort").value;
+  const st = $("#srvStatus");
+  if (!(port >= 1024 && port <= 65535)){ st.textContent = "Port must be 1024–65535."; st.className = "hint srv-bad"; return; }
+  st.textContent = "Restarting…"; st.className = "hint";
+  try {
+    const res = await fetch("/api/restart", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ port }) });
+    if (!res.ok) throw new Error();
+    restarting = Date.now() + 2500;   // suppress the error banner across the restart gap
+    st.textContent = `Restarted on port ${port}.`; st.className = "hint srv-ok";
+    if (port !== +location.port) setTimeout(() => location.href = `http://${location.hostname}:${port}/`, 1200);
+  } catch {
+    st.textContent = "Restart failed — is the server still running?"; st.className = "hint srv-bad";
+  }
+});
+
+/* ---------- init ---------- */
+document.documentElement.dataset.density = S.density;
+updateArrows();
+$("#btnStart").classList.add("is-loading");
+tick().then(() => { $("#btnStart").classList.remove("is-loading"); schedule(); });
+</script>
+</body>
+</html>
